@@ -1,11 +1,13 @@
 // ============================================================
 // MéritoPoly — Personnages (placeholders modifiables)
-// origin : niveau de vie du milieu d'origine (€/UC/cycle) → ascenseur social
+// origin : niveau de vie du milieu d'origine (€/UC/an) → ascenseur social
 // ============================================================
 
+// wealth : rang de richesse (8 = le plus fortuné, 1 = le plus précaire).
+// Le dé le plus fort attribue le personnage le plus riche.
 const CHARACTERS = [
   {
-    id: 'employe', name: 'Employé sous pression', age: 38,
+    id: 'employe', name: 'Employé sous pression', age: 38, wealth: 2,
     lieu: 'Appartement 3 pièces, quartier populaire',
     desc: 'Salarié du commerce, deux enfants, fin de mois difficile.',
     adults: 2, children: 2,
@@ -14,36 +16,36 @@ const CHARACTERS = [
     loans: [], money: 400, assets: 0, origin: 1500, props: []
   },
   {
-    id: 'cadre', name: 'Cadre endetté', age: 42,
+    id: 'cadre', name: 'Cadre endetté', age: 42, wealth: 6,
     lieu: 'Maison en périphérie (encore à crédit)',
     desc: 'Cadre supérieur, bon salaire mais mensualités lourdes.',
     adults: 2, children: 1,
     salary: 3400, variable: false, retired: false, capitalIncome: 0,
     housing: { type: 'proprio', rent: 0 },
     loans: [{ label: 'Crédit immobilier maison', remaining: 60000, monthly: 700, rate: 0.008 }],
-    money: 1500, assets: 60000, origin: 2600, props: []
+    money: 1500, assets: 60000, origin: 2600, props: [{ tile: 13 }]
   },
   {
-    id: 'agriculteur', name: 'Agriculteur-commerçant', age: 50,
+    id: 'agriculteur', name: 'Agriculteur-commerçant', age: 50, wealth: 4,
     lieu: 'Ferme familiale à la campagne',
     desc: 'Indépendant : revenus variables selon la météo et les marchés.',
     adults: 2, children: 1,
     salary: 1500, variable: true, retired: false, capitalIncome: 0,
     housing: { type: 'proprio', rent: 0 },
     loans: [{ label: 'Crédit matériel agricole', remaining: 8000, monthly: 250, rate: 0.008 }],
-    money: 900, assets: 35000, origin: 1600, props: []
+    money: 900, assets: 35000, origin: 1600, props: [{ tile: 3 }]
   },
   {
-    id: 'retraitee', name: 'Retraitée', age: 74,
+    id: 'retraitee', name: 'Retraitée', age: 74, wealth: 5,
     lieu: 'Pavillon sans crédit, quartier calme',
     desc: 'Pension modeste, patrimoine confortable, santé fragile.',
     adults: 1, children: 0,
     salary: 1200, variable: false, retired: true, capitalIncome: 0,
     housing: { type: 'proprio', rent: 0 },
-    loans: [], money: 4000, assets: 55000, origin: 1400, props: []
+    loans: [], money: 4000, assets: 55000, origin: 1400, props: [{ tile: 1 }]
   },
   {
-    id: 'heritier', name: 'Héritier rentier', age: 26,
+    id: 'heritier', name: 'Héritier rentier', age: 26, wealth: 7,
     lieu: 'Appartement de standing en centre-ville (location)',
     desc: 'Ne travaille pas : vit de revenus du patrimoine hérité.',
     adults: 1, children: 0,
@@ -52,7 +54,7 @@ const CHARACTERS = [
     loans: [], money: 2000, assets: 80000, origin: 3000, props: []
   },
   {
-    id: 'patron', name: 'Patronne fortunée', age: 55,
+    id: 'patron', name: 'Patronne fortunée', age: 55, wealth: 8,
     lieu: 'Villa avec piscine',
     desc: 'Dirige une grande entreprise, revenus du travail ET du capital.',
     adults: 1, children: 0,
@@ -60,10 +62,10 @@ const CHARACTERS = [
     housing: { type: 'proprio', rent: 0 },
     loans: [], money: 5000, assets: 150000,
     origin: 2800,
-    props: [{ tile: 39 }] // possède d'emblée TechCorp
+    props: [{ tile: 39 }, { tile: 24 }] // TechCorp et MédiaVision
   },
   {
-    id: 'infirmiere', name: 'Infirmière en HLM', age: 34,
+    id: 'infirmiere', name: 'Infirmière en HLM', age: 34, wealth: 3,
     lieu: 'Logement HLM, 2 pièces',
     desc: 'Mère solo, loyer modéré, métier utile mais sous-payé.',
     adults: 1, children: 1,
@@ -72,7 +74,7 @@ const CHARACTERS = [
     loans: [], money: 700, assets: 0, origin: 1200, props: []
   },
   {
-    id: 'intermittent', name: 'Intermittent précaire', age: 24,
+    id: 'intermittent', name: 'Intermittent précaire', age: 24, wealth: 1,
     lieu: 'Chambre chez ses parents',
     desc: 'Petits boulots, revenus incertains, aucune épargne.',
     adults: 1, children: 0,

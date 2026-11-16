@@ -19,7 +19,7 @@ const UI = {
     const sv = loadSave();
     if (sv && !sv.over) {
       $('resume-box').classList.remove('hidden');
-      $('resume-cycle').textContent = sv.cycle;
+      $('resume-cycle').textContent = sv.year;
     }
     const box = $('player-count');
     box.innerHTML = '';
@@ -57,11 +57,11 @@ const UI = {
     const sv = loadSave();
     if (!sv) return;
     S = sv;
+    if (S.phase === 'assign') { UI.show('screen-chars'); UI.renderAssign(); return; }
     UI.show('screen-board');
     UI.renderBoard();
     UI.renderHUD();
     UI.refreshDiceZone();
-    if (S.phase === 'assign') { UI.show('screen-chars'); UI.renderAssign(); }
     if (S.phase === 'vote') UI.renderVote();
     if (S.phase === 'recap') UI.renderRecap();
     if (S.phase === 'end') UI.renderEnd();
@@ -79,46 +79,35 @@ const UI = {
     location.reload();
   },
 
-  // ---------- Attribution des personnages ----------
+  // ---------- Attribution des personnages (une seule étape) ----------
   renderAssign() {
-    if (S.assignIdx >= S.players.length) {
-      $('char-assign').innerHTML = `
-        <div class="card">
-          <h3>Tous les personnages sont attribués !</h3>
-          <p class="hint">Notez sur papier les caractéristiques de votre personnage (aide-mémoire).</p>
-          ${S.players.map(p => UI.ficheHTML(p)).join('')}
-          <button class="btn primary big" onclick="UI.goBoard()">Accéder au plateau</button>
-        </div>`;
-      return;
-    }
-    const p = S.players[S.assignIdx];
+    let h = `<div class="card">
+      <p>Chaque joueur lance le dé physique : saisissez les résultats, puis générez les personnages.
+      Le <b>dé le plus fort</b> obtient le personnage <b>le plus riche</b>.</p>`;
+    S.players.forEach(p => {
+      h += `<label class="checkline"><span class="player-dot" style="background:${p.color}"></span>
+        ${esc(p.name)} — résultat du dé :</label>
+        <input type="number" id="diceval${p.id}" min="1" max="6" value="1" class="die">`;
+    });
+    h += `<button class="btn primary big" onclick="UI.doGenerate()">Générer les personnages</button></div>
+      <div id="char-result"></div>`;
+    $('char-assign').innerHTML = h;
+  },
+
+  doGenerate() {
+    const values = S.players.map(p => parseInt($('diceval' + p.id).value, 10));
+    if (values.some(v => !(v >= 1 && v <= 6))) { alert('Saisissez un résultat entre 1 et 6 pour chaque joueur'); return; }
+    generateCharacters(values);
     $('char-assign').innerHTML = `
       <div class="card">
-        <p><b>${esc(p.name)}</b>, lancez le dé physique puis saisissez la valeur :</p>
-        <div class="row-btns">
-          <input type="number" id="dice-val" min="1" max="6" value="1" class="die">
-          <button class="btn primary" onclick="UI.doAssign()">Valider</button>
-        </div>
-      </div>
-      <div id="char-result"></div>`;
+        <h3>Personnages générés !</h3>
+        <p class="hint">Notez sur papier les caractéristiques de votre personnage (aide-mémoire).</p>
+        ${S.players.map(p => UI.ficheHTML(p)).join('')}
+        <button class="btn primary big" onclick="UI.goBoard()">Accéder au plateau</button>
+      </div>`;
   },
-
-  doAssign() {
-    const v = parseInt($('dice-val').value, 10);
-    if (!(v >= 1 && v <= 6)) { alert('Saisissez une valeur entre 1 et 6'); return; }
-    const c = assignCharacter(S.assignIdx, v);
-    const p = S.players[S.assignIdx - 1];
-    $('char-result').innerHTML = `
-      <div class="dice-big">🎲 ${v}</div>
-      ${UI.ficheHTML(p)}
-      <button class="btn primary big" onclick="UI.nextAssign()">Joueur suivant</button>`;
-  },
-
-  nextAssign() { UI.renderAssign(); },
 
   goBoard() {
-    S.phase = 'dice';
-    save();
     UI.show('screen-board');
     UI.renderBoard();
     UI.renderHUD();
@@ -128,20 +117,20 @@ const UI = {
   // ---------- Fiche personnage ----------
   ficheHTML(p) {
     const housing = {
-      locataire: `Locataire privé — loyer ${fmt(p.housing.rent)}/cycle (bail : ${p.housing.bail} cycle(s))`,
+      locataire: `Locataire privé — loyer ${fmt(p.housing.rent)}/an (bail : ${p.housing.bail} an(s))`,
       hlm: 'Logé en HLM — loyer modéré ' + fmt(p.housing.rent),
       proprio: 'Propriétaire de son logement'
     }[p.housing.type];
     const rows = [
       ['Lieu de vie', esc(p.lieu)],
       ['Foyer', `${p.adults} adulte(s), ${p.children} enfant(s) (échelle ${ucOf(p).toFixed(1)} UC)`],
-      ['Revenu du travail', p.employed ? fmt(p.salary) + '/cycle' + (p.variable ? ' (variable)' : '') + (p.retired ? ' (pension)' : '') : 'Sans emploi'],
-      ['Revenus du capital', p.capitalIncome ? fmt(p.capitalIncome) + '/cycle' : '—'],
+      ['Revenu du travail', p.employed ? fmt(p.salary) + '/an' + (p.variable ? ' (variable)' : '') + (p.retired ? ' (pension)' : '') : 'Sans emploi'],
+      ['Revenus du capital', p.capitalIncome ? fmt(p.capitalIncome) + '/an' : '—'],
       ['Logement', housing],
-      ['Crédits', p.loans.length ? p.loans.map(l => `${esc(l.label)} : ${fmt(l.remaining)} restants, ${fmt(l.monthly)}/cycle`).join('<br>') : 'Aucun'],
+      ['Crédits', p.loans.length ? p.loans.map(l => `${esc(l.label)} : ${fmt(l.remaining)} restants, ${fmt(l.monthly)}/an`).join('<br>') : 'Aucun'],
       ['Liquidités', fmt(p.money)],
       ['Patrimoine net', fmt(patrimoineNet(p))],
-      ['Milieu d\'origine', fmt(p.origin) + ' /UC/cycle']
+      ['Milieu d\'origine', fmt(p.origin) + ' /UC/an']
     ];
     const props = S.tiles.filter(t => t.owner === p.id);
     if (props.length) rows.push(['Activités', props.map(t => `${esc(t.name)}${shareOf(t, p.id) < 100 ? ` (${shareOf(t, p.id)} %)` : ''}${t.houses ? ' 🏠' + t.houses : ''}`).join('<br>')]);
@@ -165,7 +154,7 @@ const UI = {
     const center = document.createElement('div');
     center.className = 'tile center';
     center.style.gridArea = '6 / 6 / 7 / 7';
-    center.innerHTML = '<div class="ctitle">MÉRITO<br>POLY<br><small>Cycle ' + S.cycle + '/10</small></div>';
+    center.innerHTML = '<div class="ctitle">MÉRITO<br>POLY<br><small>Année ' + S.year + '/' + CONFIG.years + '</small></div>';
     board.appendChild(center);
     S.tiles.forEach((t, i) => {
       const d = document.createElement('div');
@@ -204,7 +193,7 @@ const UI = {
   },
 
   renderHUD() {
-    $('hud-cycle').textContent = `Cycle ${S.cycle}/${CONFIG.cycles}`;
+    $('hud-cycle').textContent = `Année ${S.year}/${CONFIG.years}`;
     const p = cur();
     $('hud-active').innerHTML =
       `<span class="player-dot" style="background:${p.color}"></span>
@@ -215,6 +204,7 @@ const UI = {
     const p = cur();
     const inVote = S.phase === 'vote', inRecap = S.phase === 'recap';
     $('dice-zone').classList.toggle('hidden', inVote || inRecap || S.over || S.phase === 'assign');
+    if (S.phase === 'assign') return;
     if (inVote) UI.renderVote();
     if (inRecap) UI.renderRecap();
     if (S.phase === 'assign' || inVote || inRecap || S.over) return;
@@ -263,11 +253,11 @@ const UI = {
       UI.modal('Double !', `<p>${esc(r.msg)}</p>`, [{ label: 'Relancer les dés', cls: 'primary', fn: 'UI.closeModal();UI.refreshDiceZone();' }]);
       return;
     }
-    if (r.next === 'vote') {
-      startVote();
+    if (r.next === 'yearend') {
+      const recap = applyYearFlows();
       UI.renderBoard();
       UI.renderHUD();
-      UI.refreshDiceZone();
+      UI.renderRecap(recap);
       return;
     }
     UI.renderBoard(); UI.renderHUD(); UI.refreshDiceZone();
@@ -282,29 +272,13 @@ const UI = {
     let body = '', acts = [];
     switch (a.kind) {
       case 'prop': {
-        const t = a.tile;
         body += UI.consumptionHTML(a.consumption);
-        if (a.canBuy) {
-          const credit = t.price > p.money;
-          body += `<div class="infoline">Cette activité est <b>à vendre</b> : ${fmt(t.price)}. Elle rapportera ${fmt(t.dividend)} par cycle${credit ? '' : ''}.</div>`;
-          acts.push({ label: `Acheter seul — ${fmt(t.price)}`, cls: 'green', fn: `UI.doBuy(${t.id !== undefined ? t.id : S.tiles.indexOf(t)})` });
-          acts.push({ label: 'Acheter à plusieurs (parts égales)', cls: '', fn: `UI.openCoBuy(${S.tiles.indexOf(t)})` });
-        } else if (a.canImprove) {
-          const cost = t.houseCost * ((t.houses || 0) + 1);
-          const maxed = (t.houses || 0) >= CONFIG.maxHouses;
-          body += `<div class="infoline">Votre activité · amélioration : ${t.houses || 0}/${CONFIG.maxHouses}.</div>`;
-          if (!maxed) acts.push({ label: `Améliorer — ${fmt(cost)}`, cls: '', fn: `UI.doImprove(${S.tiles.indexOf(t)})` });
-        }
+        body += `<div class="infoline">Les achats d'activités et de logements se font uniquement dans les <b>4 cases Banque</b> du plateau.</div>`;
         acts.push({ label: 'Terminer le tour', cls: 'primary', fn: 'UI.closeModal();UI.onEndTurn()' });
         break;
       }
       case 'housing': {
-        const t = a.tile, idx = S.tiles.indexOf(t);
         body += UI.consumptionHTML(a.consumption);
-        if (a.canBuy) {
-          body += `<div class="infoline">Un logement est en vente : ${fmt(t.price)}. Devenir propriétaire supprime votre loyer et constitue un patrimoine (crédit possible).</div>`;
-          acts.push({ label: `Acheter ce logement — ${fmt(t.price)}`, cls: 'green', fn: `UI.doBuyHousing(${idx})` });
-        }
         if (a.hlmOffer) {
           body += `<div class="infoline">Logement social : sous conditions de revenus, vous pouvez demander un HLM.</div>`;
           acts.push({ label: 'Demander un logement HLM', cls: '', fn: 'UI.doHLM()' });
@@ -313,8 +287,9 @@ const UI = {
         break;
       }
       case 'bank': {
-        body += `<div class="infoline">Bienvenue à la banque. Emprunter, rembourser, améliorer : le crédit est automatique.</div>`;
-        acts.push({ label: 'Emprunter', cls: 'green', fn: 'UI.openLoan()' });
+        body += `<div class="infoline">Bienvenue à la banque : c'est ici qu'on achète activités et logements (seuls, à plusieurs, à crédit), qu'on emprunte, rembourse et améliore.</div>`;
+        if (S.tiles.some(t => (t.type === 'prop' || t.type === 'housing') && !t.public && t.owner === null)) acts.push({ label: 'Acheter une propriété ou un logement', cls: 'green', fn: 'UI.openBankBuy()' });
+        acts.push({ label: 'Emprunter', cls: '', fn: 'UI.openLoan()' });
         if (p.loans.length) acts.push({ label: 'Rembourser un crédit', cls: '', fn: 'UI.openRepay()' });
         if (S.tiles.some(t => t.owner === p.id && (t.houses || 0) < CONFIG.maxHouses)) acts.push({ label: 'Améliorer une propriété', cls: '', fn: 'UI.openImprove()' });
         acts.push({ label: 'Quitter la banque', cls: 'primary', fn: 'UI.closeModal();UI.onEndTurn()' });
@@ -350,14 +325,12 @@ const UI = {
     return h;
   },
 
-  doBuy(idx) { buyProperty(idx); UI.closeModal(); UI.renderBoard(); UI.renderHUD(); UI.onEndTurn(); },
-  doBuyHousing(idx) { buyHousing(idx); UI.closeModal(); UI.renderBoard(); UI.renderHUD(); UI.onEndTurn(); },
-  doHLM() { moveHLM(); UI.closeModal(); UI.onEndTurn(); },
-  doImprove(idx) {
-    const r = improveProperty(idx);
-    if (!r.ok) { alert(r.msg); return; }
-    UI.closeModal(); UI.renderBoard(); UI.renderHUD(); UI.onEndTurn();
+  doBuy(idx) {
+    buyProperty(idx); UI.closeModal(); UI.renderBoard(); UI.renderHUD();
+    UI.modal('Achat réalisé', `<div class="gainline"><b>${esc(S.tiles[idx].name)}</b> vous appartient désormais${S.tiles[idx].shares.length > 1 ? ' (copropriété)' : ''}.</div>`,
+      [{ label: 'Retour à la banque', cls: 'primary', fn: 'UI.openBank()' }]);
   },
+  doHLM() { moveHLM(); UI.closeModal(); UI.onEndTurn(); },
 
   // ---------- Achat à plusieurs ----------
   openCoBuy(idx) {
@@ -371,27 +344,73 @@ const UI = {
     h += `<p class="hint">Chacun paie sa part ; si les liquidités manquent, un crédit est automatiquement contracté.</p>`;
     UI.modal('Achat à plusieurs', h, [
       { label: 'Confirmer l\'achat groupé', cls: 'green', fn: `UI.doCoBuy(${idx})` },
-      { label: 'Annuler', cls: '', fn: 'UI.closeModal()' }
+      { label: 'Annuler', cls: '', fn: 'UI.openBank()' }
     ]);
   },
 
   doCoBuy(idx) {
     const partners = S.players.filter(p => $('cobuy' + p.id) && $('cobuy' + p.id).checked).map(p => p.id);
     buyProperty(idx, { partners });
-    UI.closeModal(); UI.renderBoard(); UI.renderHUD(); UI.onEndTurn();
+    UI.closeModal(); UI.renderBoard(); UI.renderHUD();
+    UI.modal('Achat groupé réalisé', `<div class="gainline"><b>${esc(S.tiles[idx].name)}</b> est détenu à parts égales : ${S.tiles[idx].shares.map(s => esc(S.players[s.pid].name) + ' (' + s.pct + ' %)').join(', ')}.</div>`,
+      [{ label: 'Retour à la banque', cls: 'primary', fn: 'UI.openBank()' }]);
   },
 
-  // ---------- Banque : emprunter / rembourser / améliorer ----------
+  // ---------- Banque : acheter / emprunter / rembourser / améliorer ----------
+  openBank() {
+    const p = cur();
+    let body = `<div class="infoline">Bienvenue à la banque : c'est ici qu'on achète activités et logements (seuls, à plusieurs, à crédit), qu'on emprunte, rembourse et améliore.</div>`;
+    const acts = [];
+    if (S.tiles.some(t => !t.public && t.owner === null)) acts.push({ label: 'Acheter une propriété ou un logement', cls: 'green', fn: 'UI.openBankBuy()' });
+    acts.push({ label: 'Emprunter', cls: '', fn: 'UI.openLoan()' });
+    if (p.loans.length) acts.push({ label: 'Rembourser un crédit', cls: '', fn: 'UI.openRepay()' });
+    if (S.tiles.some(t => t.owner === p.id && (t.houses || 0) < CONFIG.maxHouses)) acts.push({ label: 'Améliorer une propriété', cls: '', fn: 'UI.openImprove()' });
+    acts.push({ label: 'Quitter la banque', cls: 'primary', fn: 'UI.closeModal();UI.onEndTurn()' });
+    UI.modal('Banque', body, acts);
+  },
+
+  openBankBuy() {
+    let h = '<p>Biens disponibles à l\'achat (seul ou à plusieurs, crédit automatique si besoin) :</p>';
+    S.tiles.forEach((t, i) => {
+      if ((t.type === 'prop' || t.type === 'housing') && !t.public && t.owner === null) {
+        h += `<button class="btn" onclick="UI.confirmBankBuy(${i})">${esc(t.name)} — ${fmt(t.price)}${t.dividend ? ` · revenu ${fmt(t.dividend)}/an` : ''}</button>`;
+      }
+    });
+    UI.modal('Acheter à la banque', h, [{ label: 'Retour', cls: '', fn: 'UI.openBank()' }]);
+  },
+
+  confirmBankBuy(idx) {
+    const t = S.tiles[idx];
+    UI.modal('Acheter ' + t.name, `<p><b>${esc(t.name)}</b> — ${fmt(t.price)}.</p>
+      ${t.type === 'housing' ? '<p class="hint">Devenir propriétaire supprime votre loyer et constitue un patrimoine (crédit possible).</p>' : `<p class="hint">Rapportera ${fmt(t.dividend)} par an, et facturera la consommation aux joueurs qui y tombent.</p>`}
+      <p class="hint">Si vos liquidités sont insuffisantes, un crédit est automatiquement contracté.</p>`,
+      [{ label: `Acheter seul — ${fmt(t.price)}`, cls: 'green', fn: `UI.doBankBuy(${idx})` },
+       { label: 'Acheter à plusieurs (parts égales)', cls: '', fn: `UI.openCoBuy(${idx})` },
+       { label: 'Annuler', cls: '', fn: 'UI.openBankBuy()' }]);
+  },
+
+  doBankBuy(idx) {
+    const t = S.tiles[idx];
+    if (t.type === 'housing') {
+      buyHousing(idx);
+      UI.closeModal(); UI.renderBoard(); UI.renderHUD();
+      UI.modal('Achat réalisé', `<div class="gainline">Vous êtes propriétaire de <b>${esc(t.name)}</b> : plus de loyer, patrimoine constitué.</div>`,
+        [{ label: 'Retour à la banque', cls: 'primary', fn: 'UI.openBank()' }]);
+    } else {
+      UI.doBuy(idx);
+    }
+  },
+
   openLoan() {
-    let h = `<p>Taux actuel : <b>${(S.params.loanRate * 100).toFixed(1)} % par cycle</b>, remboursement sur ${CONFIG.loanDuration} cycles.</p>`;
+    let h = `<p>Taux actuel : <b>${(S.params.loanRate * 100).toFixed(1)} % par an</b>, remboursement sur ${CONFIG.loanDuration} ans.</p>`;
     [1000, 2000, 5000].forEach(v => {
       const m = Math.round(v * (1 + S.params.loanRate * CONFIG.loanDuration) / CONFIG.loanDuration);
       h += `<button class="btn" onclick="UI.doLoan(${v})">Emprunter ${fmt(v)} — mensualité ${fmt(m)}</button>`;
     });
-    UI.modal('Emprunter', h, [{ label: 'Retour', cls: '', fn: 'UI.closeModal();UI.onEndTurn()' }]);
+    UI.modal('Emprunter', h, [{ label: 'Retour', cls: '', fn: 'UI.openBank()' }]);
   },
 
-  doLoan(v) { bankLoan(v); UI.closeModal(); UI.renderHUD(); UI.onEndTurn(); },
+  doLoan(v) { bankLoan(v); UI.closeModal(); UI.renderHUD(); UI.openBank(); },
 
   openRepay() {
     const p = cur();
@@ -402,10 +421,10 @@ const UI = {
       const full = Math.min(l.remaining, Math.max(0, p.money));
       if (full > 0) h += `<button class="btn" onclick="UI.doRepay(${i}, ${full})">Rembourser jusqu'à ${fmt(full)} d'un coup</button>`;
     });
-    UI.modal('Rembourser', h, [{ label: 'Retour', cls: '', fn: 'UI.closeModal();UI.onEndTurn()' }]);
+    UI.modal('Rembourser', h, [{ label: 'Retour', cls: '', fn: 'UI.openBank()' }]);
   },
 
-  doRepay(i, amount) { bankRepay(i, amount); UI.closeModal(); UI.renderHUD(); UI.onEndTurn(); },
+  doRepay(i, amount) { bankRepay(i, amount); UI.closeModal(); UI.renderHUD(); UI.openBank(); },
 
   openImprove() {
     const p = cur();
@@ -416,13 +435,13 @@ const UI = {
         h += `<button class="btn" onclick="UI.doImproveBank(${i})">${esc(t.name)} — ${fmt(cost)} (${t.houses || 0}/${CONFIG.maxHouses})</button>`;
       }
     });
-    UI.modal('Améliorer', h, [{ label: 'Retour', cls: '', fn: 'UI.closeModal();UI.onEndTurn()' }]);
+    UI.modal('Améliorer', h, [{ label: 'Retour', cls: '', fn: 'UI.openBank()' }]);
   },
 
   doImproveBank(idx) {
     const r = improveProperty(idx);
     if (!r.ok) { alert(r.msg); return; }
-    UI.closeModal(); UI.renderBoard(); UI.renderHUD(); UI.onEndTurn();
+    UI.closeModal(); UI.renderBoard(); UI.renderHUD(); UI.openBank();
   },
 
   // ---------- Échanges ----------
@@ -443,7 +462,7 @@ const UI = {
     h += '<h3>Proposer un emploi</h3>';
     h += `<select id="jb-to">${S.players.filter(x => x.id !== p.id && !x.employed).map(x => `<option value="${x.id}">${esc(x.name)} (sans emploi)</option>`).join('') || '<option value="">Aucun joueur disponible</option>'}</select>`;
     h += `<select id="jb-tile">${S.tiles.map((t, i) => shareOf(t, p.id) >= 50 ? `<option value="${i}">${esc(t.name)}</option>` : '').join('')}</select>`;
-    h += `<input type="number" id="jb-salary" placeholder="Salaire par cycle (€)" value="1200">`;
+    h += `<input type="number" id="jb-salary" placeholder="Salaire par an (€)" value="1200">`;
     h += `<button class="btn green" onclick="UI.doTradeJob()">Embaucher</button>`;
     UI.modal('Échanges et négociations', h, [{ label: 'Fermer', cls: 'primary', fn: 'UI.closeModal()' }]);
   },
@@ -466,58 +485,57 @@ const UI = {
     UI.closeModal(); UI.renderBoard(); UI.renderHUD();
   },
 
-  // ---------- Vote de loi ----------
+  // ---------- Vote de loi (majorité unique) ----------
   renderVote() {
     const v = S.vote;
     if (!v) return;
     if (S.phase === 'vote' && !v.chosen) {
       const leg = S.players[v.legislator];
-      let h = `<p><span class="player-dot" style="background:${leg.color}"></span><b>${esc(leg.name)}</b> est le législateur de ce cycle. Choisissez UNE loi à soumettre au vote :</p>`;
+      let h = `<p><span class="player-dot" style="background:${leg.color}"></span><b>${esc(leg.name)}</b> est le législateur de l'année ${S.year}. Choisissez UNE loi à soumettre au vote :</p>`;
       v.options.forEach((l, i) => {
         h += `<div class="event-card"><div class="ev-title">${esc(l.title)}</div><p>${esc(l.text)}</p>
           <button class="btn primary" onclick="UI.doChooseLaw(${i})">Soumettre au vote</button></div>`;
       });
       UI.show('screen-board');
       $('dice-zone').classList.add('hidden');
-      UI.modal('Phase démocratique — Cycle ' + S.cycle, h, []);
+      UI.modal('Phase démocratique — Année ' + S.year, h, []);
       return;
     }
-    if (v.chosen && v.idx < v.votes.length) {
-      const voter = S.players[v.idx];
+    if (v.chosen && !v.result) {
+      const leg = S.players[v.legislator];
       let h = `<div class="event-card"><div class="ev-title">${esc(v.chosen.title)}</div><p>${esc(v.chosen.text)}</p></div>`;
-      h += `<p><span class="player-dot" style="background:${voter.color}"></span><b>${esc(voter.name)}</b>, votez :</p>`;
+      h += `<p>Après discussion, le groupe a-t-il voté <b>majoritairement POUR</b> ou <b>CONTRE</b> ?</p>
+        <p class="hint">En cas d'égalité, le législateur <b>${esc(leg.name)}</b> départage : il presse son choix.</p>`;
       UI.modal('Vote : ' + v.chosen.title, h, [
-        { label: '👍 POUR', cls: 'green', fn: 'UI.doVote(true)' },
-        { label: '👎 CONTRE', cls: '', fn: 'UI.doVote(false)' }
+        { label: '👍 Majorité POUR', cls: 'green', fn: 'UI.doMajority(true)' },
+        { label: '👎 Majorité CONTRE', cls: '', fn: 'UI.doMajority(false)' }
       ]);
       return;
-    }
-    if (v.chosen && v.idx >= v.votes.length && !v.result) {
-      resolveVote();
     }
     if (v.result) {
       const r = v.result;
       let h = `<p><b>${esc(v.chosen.title)}</b></p>
-        <p>${r.adopted ? '✅ <b>Adoptée</b>' : '❌ <b>Rejetée</b>'} — ${r.yes} pour, ${r.no} contre${r.tieBreak ? ' (égalité : le législateur a tranché)' : ''}.</p>
-        ${r.adopted ? `<div class="gainline">${esc(v.chosen.text)}</div>` : ''}`;
-      UI.modal('Résultat du vote', h, [{ label: 'Voir le bilan du cycle', cls: 'primary', fn: 'UI.doAfterVote()' }]);
+        <p>${r.adopted ? '✅ <b>Adoptée</b>' : '❌ <b>Rejetée</b>'} — majorité ${r.majority}.</p>
+        ${r.adopted ? `<div class="gainline">${esc(v.chosen.text)}<br><small>S'applique à partir de l'année ${S.year + 1}.</small></div>` : ''}`;
+      UI.modal('Résultat du vote', h, [{ label: 'Année suivante →', cls: 'primary', fn: 'UI.doAfterVote()' }]);
     }
   },
 
   doChooseLaw(i) { chooseLaw(i); UI.renderVote(); },
-  doVote(yes) { castVote(yes); UI.renderVote(); },
+  doMajority(yes) { setMajority(yes); UI.renderVote(); },
   doAfterVote() {
-    const recap = afterVote();
+    const r = afterVote();
     UI.closeModal();
-    UI.renderBoard(); UI.renderHUD();
-    UI.renderRecap(recap);
+    if (r.next === 'play') {
+      UI.renderBoard(); UI.renderHUD(); UI.refreshDiceZone();
+    }
   },
 
-  // ---------- Récapitulatif de fin de cycle ----------
+  // ---------- Bilan de fin d'année ----------
   renderRecap(recap) {
     recap = recap || S.recap;
     if (!recap) return;
-    let h = `<p class="hint">Fin du cycle ${recap.cycle} : salaires, dividendes, impôts, prestations et crédits appliqués automatiquement.</p>`;
+    let h = `<p class="hint">Fin de l'année ${recap.year} : salaires, dividendes, loyers, impôts, prestations et crédits appliqués automatiquement.</p>`;
     h += '<table><tr><th>Joueur</th><th>Travail</th><th>Capital</th><th>Loyer</th><th>Impôts</th><th>Prestations</th><th>Crédit</th><th>Net</th><th>Liquidités</th></tr>';
     recap.rows.forEach(r => {
       const p = playerById(r.pid);
@@ -529,11 +547,23 @@ const UI = {
     });
     h += '</table>';
     const st = S.history[S.history.length - 1];
-    if (st) h += `<div class="kpi"><span>Inégalités de revenus (indice)</span><b>${st.giniIncome.toFixed(2)}</b></div>
-      <div class="kpi"><span>Inégalités de patrimoine</span><b>${st.giniWealth.toFixed(2)}</b></div>
-      <div class="kpi"><span>Précarité</span><b>${Math.round(st.precarity * 100)} %</b></div>`;
-    UI.modal('Bilan du cycle ' + recap.cycle, h, [
-      { label: S.cycle >= CONFIG.cycles ? 'Voir les résultats finaux' : 'Cycle suivant →', cls: 'primary', fn: 'UI.doContinue()' }
+    const prev = S.history[S.history.length - 2] || S.baseline;
+    if (st) {
+      const trend = (now, before, lowerIsBetter) => {
+        if (before === undefined || before === null) return '';
+        const better = lowerIsBetter ? now < before : now > before;
+        const same = Math.abs(now - before) < 1e-9;
+        const icon = same ? '➖' : (better ? '🟢' : '🔴');
+        return ` <b>${icon}</b>`;
+      };
+      h += '<h3>Indicateurs sociaux (' + (prev === S.baseline ? 'vs début de partie' : 'vs année précédente') + ')</h3>';
+      h += `<div class="kpi"><span>Inégalités de revenus (indice)</span><b>${st.giniIncome.toFixed(2)}${trend(st.giniIncome, prev && prev.giniIncome, true)}</b></div>
+        <div class="kpi"><span>Inégalités de patrimoine</span><b>${st.giniWealth.toFixed(2)}${trend(st.giniWealth, prev && prev.giniWealth, true)}</b></div>
+        <div class="kpi"><span>Précarité</span><b>${Math.round(st.precarity * 100)} %${trend(st.precarity, prev && prev.precarity, true)}</b></div>
+        <div class="kpi"><span>Ascenseur social (100 = stable)</span><b>${Math.round(st.mobility * 100)}${trend(st.mobility, prev && prev.mobility, false)}</b></div>`;
+    }
+    UI.modal('Bilan de fin d\'année ' + recap.year, h, [
+      { label: S.year >= CONFIG.years ? 'Voir les résultats finaux' : 'Passer au vote de la loi →', cls: 'primary', fn: 'UI.doContinue()' }
     ]);
   },
 
@@ -542,7 +572,9 @@ const UI = {
     UI.closeModal();
     if (S.pendingDeaths && S.pendingDeaths.length) { UI.renderDeath(); return; }
     if (r.next === 'end') { UI.renderEnd(); return; }
-    UI.renderBoard(); UI.renderHUD(); UI.refreshDiceZone();
+    startVote();
+    UI.renderBoard(); UI.renderHUD();
+    UI.renderVote();
   },
 
   // ---------- Mort et héritage ----------
@@ -598,7 +630,7 @@ const UI = {
       h += `<div class="kpi"><span><span class="player-dot" style="background:${p.color}"></span>${esc(p.name)}</span>
         <b>${on.length ? '<span class="badge b-precar">' + on.join(' · ') + '</span>' : 'OK'}</b></div>`;
     });
-    h += `<h3>4 · Niveaux de vie (€/UC/cycle)</h3>`;
+    h += `<h3>4 · Niveaux de vie (€/UC/an)</h3>`;
     h += '<table><tr><th>Joueur</th><th>Actuel</th><th>Origine</th></tr>';
     S.players.forEach((p, i) => {
       h += `<tr><td>${esc(p.name)}</td><td><b>${fmt(st.levels[i])}</b></td><td>${fmt(p.origin)}</td></tr>`;
@@ -611,7 +643,7 @@ const UI = {
     let h = '<p class="hint">Lois adoptées pendant la partie (elles modifient les paramètres des tours suivants) :</p>';
     if (!S.adoptedLaws.length) h += '<p>Aucune loi adoptée pour l\'instant.</p>';
     S.adoptedLaws.forEach(l => {
-      h += `<div class="event-card"><div class="ev-title">Cycle ${l.cycle} — ${esc(l.title)}</div><p>${esc(l.text)}</p></div>`;
+      h += `<div class="event-card"><div class="ev-title">Année ${l.year} — ${esc(l.title)}</div><p>${esc(l.text)}</p></div>`;
     });
     h += `<h3>Paramètres actuels</h3><table>
       <tr><td>Remboursement santé</td><td>${Math.round(S.params.healthReimb * 100)} %</td></tr>
@@ -621,14 +653,14 @@ const UI = {
       <tr><td>Revenu minimum / UC</td><td>${fmt(S.params.minimumIncome)}</td></tr>
       <tr><td>Flat tax capital</td><td>${Math.round(S.params.capitalTax * 100)} %</td></tr>
       <tr><td>Droits de succession</td><td>${Math.round(S.params.successions * 100)} %</td></tr>
-      <tr><td>Taux d'emprunt / cycle</td><td>${(S.params.loanRate * 100).toFixed(1)} %</td></tr>
+      <tr><td>Taux d'emprunt / an</td><td>${(S.params.loanRate * 100).toFixed(1)} %</td></tr>
       <tr><td>Prix de l'énergie</td><td>× ${S.params.energyPrice.toFixed(2)}</td></tr>
     </table>`;
     UI.modal('Lois et paramètres', h, [{ label: 'Fermer', cls: 'primary', fn: 'UI.closeModal()' }]);
   },
 
   openLog() {
-    let h = S.log.map(l => `<div class="logline"><small>C${l.cycle}</small> · ${l.html}</div>`).join('') || '<p>Rien pour l\'instant.</p>';
+    let h = S.log.map(l => `<div class="logline"><small>An ${l.year}</small> · ${l.html}</div>`).join('') || '<p>Rien pour l\'instant.</p>';
     UI.modal('Journal de partie', h, [{ label: 'Fermer', cls: 'primary', fn: 'UI.closeModal()' }]);
   },
 
@@ -637,7 +669,7 @@ const UI = {
     const t = S.tiles[i];
     let h = `<p><b>${esc(t.name)}</b></p>`;
     if (t.type === 'prop' || t.type === 'housing') {
-      h += `<p>Prix : ${fmt(t.price)} · Revenu automatique : ${t.dividend ? fmt(t.dividend) + '/cycle' : '—'}</p>`;
+      h += `<p>Prix : ${fmt(t.price)} · Revenu automatique : ${t.dividend ? fmt(t.dividend) + '/an' : '—'}</p>`;
       h += `<p>Consommation type : ${esc(t.service.label)} — ${fmt(t.service.price)} (${esc(t.service.cat)})</p>`;
       if (t.public) h += '<div class="infoline">Service public.</div>';
       if (t.owner !== null) {
@@ -674,7 +706,7 @@ const UI = {
         <td>${esc(p.cname)}</td><td>${fmt(p.money)}</td><td>${fmt(st.pats[i])}</td><td>${fmt(st.levels[i])}</td></tr>`;
     });
     h += '</table></div>';
-    h += `<div class="card"><h3>Loi(s) adoptée(s)</h3>${S.adoptedLaws.map(l => `<div class="logline">C${l.cycle} · <b>${esc(l.title)}</b></div>`).join('') || '<p class="hint">Aucune.</p>'}</div>`;
+    h += `<div class="card"><h3>Loi(s) adoptée(s)</h3>${S.adoptedLaws.map(l => `<div class="logline">An ${l.year} · <b>${esc(l.title)}</b></div>`).join('') || '<p class="hint">Aucune.</p>'}</div>`;
     h += `<div class="card small"><p class="hint">Comparez les trajectoires : revenus du travail vs revenus du capital, situations avant/après redistribution, effet de l'héritage.</p></div>`;
     $('end-content').innerHTML = h;
     UI.show('screen-end');

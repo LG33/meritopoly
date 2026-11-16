@@ -12,6 +12,11 @@ function avg(a) { return a.length ? a.reduce((s, v) => s + v, 0) / a.length : 0;
 
 let S = null; // état global de la partie
 
+// Classement des personnages par richesse décroissante
+function byWealth() {
+  return CHARACTERS.slice().sort((a, b) => (b.wealth || 0) - (a.wealth || 0));
+}
+
 function save() {
   if (typeof localStorage !== 'undefined') {
     try { localStorage.setItem(SAVE_KEY, JSON.stringify(S)); } catch (e) { /* quota */ }
@@ -26,10 +31,9 @@ function clearSave() { if (typeof localStorage !== 'undefined') localStorage.rem
 // ---------- Création de partie ----------
 
 function newGame(names) {
-  const pool = shuffle(CHARACTERS.slice());
   S = {
-    cycle: 1, cur: 0, legislator: 0, phase: 'assign', turnCount: 0,
-    doubles: 0, names: names.slice(), pool,
+    year: 1, cur: 0, legislator: 0, phase: 'assign', turnCount: 0,
+    doubles: 0, crossedDepart: false, names: names.slice(),
     players: names.map((n, i) => ({
       id: i, name: n, color: PAWN_COLORS[i], position: 0, jail: 0, deceased: false,
       char: null, cname: '', age: 0, lieu: '', desc: '',
@@ -45,25 +49,52 @@ function newGame(names) {
     decks: {
       chance: shuffle(EVENTS.chance), malheur: shuffle(EVENTS.malheur), commu: shuffle(EVENTS.commu)
     },
-    log: [], history: [], baseline: null,
-    pending: null, vote: null, recap: null, over: false, results: null,
-    assignIdx: 0
+    log: [], history: [], baseline: null, pendingDeaths: [],
+    pending: null, vote: null, recap: null, over: false, results: null
   };
-  logAdd(`Partie créée : ${names.length} joueurs, 10 cycles.`);
+  logAdd(`Partie créée : ${names.length} joueurs, ${CONFIG.years} ans.`);
   save();
   return S;
 }
 
-function assignCharacter(pid, diceVal) {
-  const p = S.players[pid];
-  const c = S.pool[(diceVal - 1) % S.pool.length];
-  S.pool = S.pool.filter(x => x.id !== c.id);
-  applyCharacter(p, c);
-  S.assignIdx++;
-  logAdd(`${p.name} joue <b>${c.name}</b>.`);
+// Génération en une étape : le dé le plus fort = personnage le plus riche,
+// profils diversifiés (toujours le plus riche et le plus précaire inclus).
+function generateCharacters(diceValues) {
+  const n = diceValues.length;
+  const ranked = byWealth();
+  const selected = [ranked[0]];
+  if (n > 1) selected.push(ranked[ranked.length - 1]);
+  const middle = ranked.slice(1, -1);
+  const k = n - 2;
+  const used = new Set();
+  for (let i = 0; i < k; i++) {
+    let idx;
+    if (i === 0 && middle.some(m => (m.props || []).length)) {
+      // garantir un second profil propriétaire pour la diversité
+      idx = middle.findIndex(m => (m.props || []).length);
+    } else {
+      idx = k === 1 ? Math.floor(middle.length / 2)
+        : Math.round(i * (middle.length - 1) / (k - 1));
+    }
+    if (!used.has(idx)) { used.add(idx); selected.push(middle[idx]); }
+  }
+  while (selected.length < n) {
+    const next = middle.find(m => !selected.includes(m));
+    if (!next) break;
+    selected.push(next);
+  }
+  selected.sort((a, b) => (b.wealth || 0) - (a.wealth || 0));
+  const order = diceValues.map((v, i) => ({ v, i })).sort((a, b) => b.v - a.v);
+  order.forEach((o, rank) => {
+    applyCharacter(S.players[o.i], selected[Math.min(rank, selected.length - 1)]);
+    logAdd(`${S.players[o.i].name} (dé ${o.v}) joue <b>${selected[Math.min(rank, selected.length - 1)].name}</b>.`);
+  });
+  S.phase = 'dice';
   save();
-  return c;
+  return S.players;
 }
+
+
 
 function applyCharacter(p, c) {
   p.char = c.id; p.cname = c.name; p.age = c.age; p.lieu = c.lieu; p.desc = c.desc;
@@ -119,12 +150,12 @@ function monthlyHousingCost(p) {
 }
 function levelOfLife(p) {
   if (p.lastFlux) return p.lastNet / ucOf(p);
-  return p.origin; // avant le premier cycle : milieu d'origine
+  return p.origin; // avant la première année : milieu d'origine
 }
 function householdFactor(p) { return Math.max(1, p.adults + 0.5 * p.children); }
 
 function logAdd(html) {
-  S.log.unshift({ cycle: S.cycle, html });
+  S.log.unshift({ year: S.year, html });
   if (S.log.length > 120) S.log.pop();
 }
 
@@ -166,10 +197,11 @@ function roll(d1, d2) {
   }
   const from = p.position;
   p.position = (p.position + d1 + d2) % 40;
-  if (p.position < from) {
+  if (p.position < from || p.position === 0) {
     p.money += CONFIG.passingGo;
     res.passedGo = true;
     logAdd(`${p.name} passe à la case Départ : +${fmt(CONFIG.passingGo)}.`);
+    if (p.id === 0) S.crossedDepart = true; // le 1er joueur déclenche la fin d'année
   }
   res.pos = p.position;
   return res;
@@ -299,6 +331,9 @@ function taxAction(p, t) {
 function buyProperty(tileId, opts) {
   const p = cur();
   const t = S.tiles[tileId];
+  if (!t || (t.type !== 'prop' && t.type !== 'housing') || t.public || t.owner !== null) {
+    return { ok: false, msg: 'Ce bien n\'est pas disponible à la vente.' };
+  }
   opts = opts || {};
   const partners = (opts.partners || []).map(id => playerById(id));
   const buyers = [p].concat(partners);
@@ -375,7 +410,7 @@ function takeLoanInternal(p, amount, label) {
   const monthly = Math.round(amount * (1 + rate * n) / n);
   p.loans.push({ label, remaining: amount, monthly, rate });
   p.money += amount;
-  logAdd(`${p.name} emprunte ${fmt(amount)} (${label}) : mensualité ${fmt(monthly)}/cycle.`);
+  logAdd(`${p.name} emprunte ${fmt(amount)} (${label}) : mensualité ${fmt(monthly)}/an.`);
 }
 
 function bankLoan(amount) {
@@ -439,23 +474,23 @@ function applyEffects(p, effects, lines) {
         break;
       }
       case 'salaryPct':
-        if (p.employed && !p.retired) { p.salary = Math.max(200, Math.round(p.salary * (1 + e.p))); lines.push(`Salaire : ${fmt(p.salary)}/cycle.`); }
+        if (p.employed && !p.retired) { p.salary = Math.max(200, Math.round(p.salary * (1 + e.p))); lines.push(`Salaire : ${fmt(p.salary)}/an.`); }
         break;
       case 'capitalIncomeAdd':
-        p.capitalIncome += e.v; lines.push(`Revenus du capital : +${fmt(e.v)}/cycle.`); break;
+        p.capitalIncome += e.v; lines.push(`Revenus du capital : +${fmt(e.v)}/an.`); break;
       case 'loseJob':
         if (p.employed && !p.retired) { p.employed = false; p.salary = 0; lines.push(`Vous perdez votre emploi !`); }
         else lines.push(`Sans effet : vous n'avez pas d'emploi salarié.`);
         break;
       case 'findJob':
-        if (!p.employed) { p.employed = true; p.salary = e.v; lines.push(`Nouvel emploi : ${fmt(e.v)}/cycle.`); }
+        if (!p.employed) { p.employed = true; p.salary = e.v; lines.push(`Nouvel emploi : ${fmt(e.v)}/an.`); }
         break;
       case 'inherit':
         p.assets += e.v; lines.push(`Patrimoine : +${fmt(e.v)} (maison héritée).`); break;
       case 'assetsAdd':
         p.assets += e.v; lines.push(`Patrimoine : +${fmt(e.v)}.`); break;
       case 'rentPct':
-        if (p.housing.type === 'locataire') { p.housing.rent = Math.max(100, Math.round(p.housing.rent * (1 + e.p))); lines.push(`Nouveau loyer : ${fmt(p.housing.rent)}/cycle.`); }
+        if (p.housing.type === 'locataire') { p.housing.rent = Math.max(100, Math.round(p.housing.rent * (1 + e.p))); lines.push(`Nouveau loyer : ${fmt(p.housing.rent)}/an.`); }
         else lines.push(`Sans effet : vous n'êtes pas locataire privé.`);
         break;
       case 'birth':
@@ -532,7 +567,7 @@ function applyCollective(card) {
       case 'ratesDelta':
         S.params.loanRate = Math.max(0, S.params.loanRate + e.d);
         S.players.forEach(p => p.loans.forEach(l => { l.rate += e.d > 0 ? e.d / 2 : 0; l.monthly = Math.round(l.monthly * (1 + Math.max(0, e.d) * 3)); }));
-        lines.push({ pid: -1, html: `Taux d'emprunt : ${Math.round(S.params.loanRate * 1000) / 10} % par cycle. Les emprunteurs paient plus cher.` });
+        lines.push({ pid: -1, html: `Taux d'emprunt : ${Math.round(S.params.loanRate * 1000) / 10} % par an. Les emprunteurs paient plus cher.` });
         break;
       case 'propValuePct':
         S.tiles.forEach(t => { if (t.type === 'prop' || t.type === 'housing') t.price = Math.max(100, Math.round(t.price * (1 + e.p))); });
@@ -614,7 +649,7 @@ function tradeOfferJob(toPid, salary, tileId) {
   if (!S.tiles[tileId] || shareOf(S.tiles[tileId], p.id) < 50) return { ok: false, msg: 'Vous devez détenir au moins 50 % de l\'activité.' };
   if (target.employed) return { ok: false, msg: `${target.name} a déjà un emploi.` };
   target.employed = true; target.salary = salary;
-  logAdd(`${p.name} embauche ${target.name} dans ${S.tiles[tileId].name} (${fmt(salary)}/cycle).`);
+  logAdd(`${p.name} embauche ${target.name} dans ${S.tiles[tileId].name} (${fmt(salary)}/an).`);
   save();
   return { ok: true };
 }
@@ -624,18 +659,21 @@ function tradeOfferJob(toPid, salary, tileId) {
 function endTurn() {
   S.pending = null;
   S.turnCount++;
-  if (S.doubles > 0 && cur().jail === 0 && S._extra !== true) {
+  const finished = cur();
+  if (S.doubles > 0 && finished.jail === 0 && S._extra !== true) {
     // double : rejouer (une fois max pour la fluidité)
     S._extra = true;
     save();
     return { next: 'same', msg: 'Double ! Vous rejouez.' };
   }
   S._extra = false; S.doubles = 0;
-  S.cur++;
-  if (S.cur >= S.players.length) {
-    S.cur = 0;
-    return { next: 'vote' };
+  // Fin d'année : déclenchée par le 1er joueur arrivant sur ou dépassant la case Départ
+  if (finished.id === 0 && S.crossedDepart) {
+    S.crossedDepart = false;
+    return { next: 'yearend' };
   }
+  S.cur++;
+  if (S.cur >= S.players.length) S.cur = 0;
   save();
   return { next: 'play' };
 }
@@ -644,7 +682,7 @@ function endTurn() {
 
 function startVote() {
   const options = shuffle(LAWS).slice(0, 5);
-  S.vote = { legislator: S.legislator, options, chosen: null, votes: null, idx: 0 };
+  S.vote = { legislator: S.legislator, options, chosen: null, result: null };
   S.phase = 'vote';
   save();
   return S.vote;
@@ -652,53 +690,34 @@ function startVote() {
 
 function chooseLaw(idx) {
   S.vote.chosen = S.vote.options[idx];
-  S.vote.votes = S.players.map(() => null);
-  S.vote.idx = 0;
   save();
   return S.vote;
 }
 
-function castVote(yes) {
-  S.vote.votes[S.vote.idx] = yes;
-  S.vote.idx++;
-  save();
-  return S.vote;
-}
-
-function resolveVote() {
+// Vote majoritaire unique : le groupe répond POUR ou CONTRE.
+// En cas d'égalité réelle entre joueurs, le législateur (qui répond) départage.
+function setMajority(yes) {
   const v = S.vote;
-  const yes = v.votes.filter(x => x === true).length;
-  const no = v.votes.length - yes;
-  let adopted = yes > no;
-  if (yes === no) { // égalité : le législateur tranche
-    adopted = v.votes[v.legislator] === true;
-    v.tieBreak = true;
-  }
-  v.result = { yes, no, adopted };
-  if (adopted) {
+  v.result = { majority: yes ? 'pour' : 'contre', adopted: !!yes, tieBreak: false };
+  if (v.result.adopted) {
     const law = v.chosen;
     law.fn(S.params, S.players);
-    S.adoptedLaws.push({ cycle: S.cycle, title: law.title, text: law.text });
-    logAdd(`⚖️ Loi adoptée : <b>${law.title}</b> (${yes} pour, ${no} contre).`);
+    S.adoptedLaws.push({ year: S.year, title: law.title, text: law.text });
+    logAdd(`⚖️ Loi adoptée : <b>${law.title}</b> (majorité pour).`);
   } else {
-    logAdd(`⚖️ Loi rejetée : <b>${v.chosen.title}</b> (${yes} pour, ${no} contre).`);
+    logAdd(`⚖️ Loi rejetée : <b>${v.chosen.title}</b> (majorité contre).`);
   }
   save();
   return v;
 }
 
-function afterVote() {
-  S.vote = null;
-  return applyCycleFlows();
-}
-
-// ---------- Flux automatiques de fin de cycle ----------
+// ---------- Flux automatiques de fin d'année (impôts, charges, allocations) ----------
 
 function variableIncome(p) {
   return Math.round(p.salary * (0.6 + Math.random() * 0.8));
 }
 
-function applyCycleFlows() {
+function applyYearFlows() {
   const recap = [];
   const deaths = [];
   S.players.forEach(p => {
@@ -786,8 +805,8 @@ function applyCycleFlows() {
     if (p.age >= 70 && Math.random() < (p.age - 65) * 0.02) deaths.push(p.id);
   });
 
-  S.pendingDeaths = deaths;
-  S.recap = { cycle: S.cycle, rows: recap };
+  S.pendingDeaths = (S.pendingDeaths || []).concat(deaths);
+  S.recap = { year: S.year, rows: recap };
   S.history.push(computeStats());
   if (!S.baseline) S.baseline = S.history[0];
   S.phase = 'recap';
@@ -797,15 +816,20 @@ function applyCycleFlows() {
 
 function continueAfterRecap() {
   S.recap = null;
-  S.legislator = (S.legislator + 1) % S.players.length;
-  if (S.cycle >= CONFIG.cycles) {
+  if (S.year >= CONFIG.years) {
     S.over = true;
     S.results = finalResults();
     S.phase = 'end';
     save();
     return { next: 'end' };
   }
-  S.cycle++;
+  return { next: 'vote' };
+}
+
+function afterVote() {
+  S.vote = null;
+  S.legislator = (S.legislator + 1) % S.players.length;
+  S.year++;
   S.phase = 'dice';
   save();
   return { next: 'play' };
@@ -839,7 +863,7 @@ function confirmDeath(pid) {
   p.jail = 0; p.health = 1;
   // les parts de propriétés restent attachées au joueur (transmission)
   logAdd(`🕯️ ${heirName} décède. Son descendant hérite de ${fmt(inherited)} (droits de succession : ${fmt(tax)}).`);
-  S.pendingDeaths = S.pendingDeaths.filter(id => id !== pid);
+  S.pendingDeaths = (S.pendingDeaths || []).filter(id => id !== pid);
   save();
   return { tax, inherited, heir: p.cname };
 }
@@ -873,7 +897,7 @@ function computeStats() {
   const flags = S.players.map(p => precarityFlags(p));
   const precarity = S.players.filter((p, i) => Object.values(flags[i]).some(Boolean)).length / S.players.length;
   return {
-    cycle: S.cycle,
+    year: S.year,
     levels, pats,
     giniIncome: gini(levels),
     giniWealth: gini(pats),
@@ -906,5 +930,5 @@ function finalResults() {
 
 // ---------- Export (Node) ----------
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { newGame, assignCharacter, allAssigned, roll, landOn, buyProperty, buyHousing, moveHLM, improveProperty, bankLoan, bankRepay, endTurn, startVote, chooseLaw, castVote, resolveVote, afterVote, continueAfterRecap, confirmDeath, computeStats, finalResults, tradeBuyProperty, tradeSellShare, tradeOfferJob, getState: () => S, fmt, CONFIG, PARAMS };
+  module.exports = { newGame, generateCharacters, roll, landOn, buyProperty, buyHousing, moveHLM, improveProperty, bankLoan, bankRepay, endTurn, startVote, chooseLaw, setMajority, applyYearFlows, afterVote, continueAfterRecap, confirmDeath, computeStats, finalResults, tradeBuyProperty, tradeSellShare, tradeOfferJob, getState: () => S, fmt, CONFIG, PARAMS };
 }

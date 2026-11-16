@@ -1,5 +1,7 @@
 // ============================================================
-// Test de bout en bout : simule une partie complète de 10 cycles
+// Test de bout en bout : simule des parties complètes de 10 ans
+// (1 an = 1 tour du plateau, fin d'année au passage du 1er joueur
+// sur la case Départ).
 // Exécuter : node test/smoke.js
 // ============================================================
 
@@ -38,80 +40,95 @@ check(counts.bank === 4, '4 banques');
 check(counts.chance === 3 && counts.commu === 3 && counts.malheur === 4, 'cases événements 3/3/4');
 check(counts.housing === 4, '4 ensembles logements');
 
-// ---------- Attribution ----------
-console.log('— Attribution des personnages —');
-for (let i = 0; i < 4; i++) E.assignCharacter(i, rnd(6));
-check(E.allAssigned(), 'tous les personnages attribués');
-check(new Set(g().players.map(p => p.char)).size === 4, 'personnages uniques');
+// ---------- Génération des personnages (une seule étape) ----------
+console.log('— Génération des personnages —');
+const dice = [2, 6, 4, 1]; // Bob (6) le plus riche, Dave (1) le plus précaire
+E.generateCharacters(dice);
+const players = g().players;
+check(players.every(p => p.char !== null), 'tous les personnages générés');
+check(new Set(players.map(p => p.char)).size === 4, 'profils diversifiés (tous différents)');
+const bob = players[1], dave = players[3];
+const wealthOf = cname => {
+  const base = { 'Patronne fortunée': 8, 'Héritier rentier': 7, 'Cadre endetté': 6, 'Retraitée': 5, 'Agriculteur-commerçant': 4, 'Infirmière en HLM': 3, 'Employé sous pression': 2, 'Intermittent précaire': 1 };
+  return base[cname.split(' (descendant')[0]] || 0;
+};
+check(wealthOf(bob.cname) > wealthOf(dave.cname), 'dé le plus fort → personnage plus riche');
+const ownedTiles = g().tiles.filter(t => t.owner !== null).length;
+const distinctOwners = new Set(g().tiles.filter(t => t.owner !== null).map(t => t.owner)).size;
+check(ownedTiles >= 2 && distinctOwners >= 2, 'certains personnages possèdent 1 ou plusieurs propriétés (' + ownedTiles + ' cases, ' + distinctOwners + ' propriétaires)');
 
-// ---------- 10 cycles ----------
+// ---------- 10 ans ----------
 console.log('— Partie complète —');
-let landings = 0, buys = 0, events = 0, votes = 0, loans = 0, trades = 0, deaths = 0;
+let landings = 0, events = 0, votes = 0, loans = 0, trades = 0, deaths = 0, yearEnds = 0, bankBuys = 0, consumptions = 0;
 
-for (let cycle = 1; cycle <= 10; cycle++) {
-  check(g().cycle === cycle, `cycle ${cycle}`);
-  for (let t = 0; t < 4; t++) {
-    // chaque joueur joue (doubles → tour supplémentaire géré par next:'same')
-    let guard = 0, next = 'play';
-    while (guard++ < 3) {
-      const r = E.roll(rnd(6), rnd(6));
-      if (r.stayJail || r.jail) { next = E.endTurn().next; break; }
-      const a = E.landOn();
-      landings++;
-      if (a.kind === 'event') events++;
-      if (a.deaths && a.deaths.length) { a.deaths.forEach(pid => E.confirmDeath(pid)); deaths++; }
-      // décisions simples
-      if (a.kind === 'prop' && a.canBuy && Math.random() < 0.7) {
-        const p = g().players[g().cur];
-        if (p.money >= a.tile.price || Math.random() < 0.5) {
-          const partners = Math.random() < 0.15 && g().players.length > 2 ? [g().players[(g().cur + 1) % 4].id] : [];
-          const res = E.buyProperty(g().tiles.indexOf(a.tile), { partners });
-          check(res.ok !== false, 'achat de propriété');
-          buys++;
-        }
-      }
-      if (a.kind === 'housing' && a.canBuy && Math.random() < 0.5) { E.buyHousing(g().tiles.indexOf(a.tile)); buys++; }
-      if (a.kind === 'housing' && a.hlmOffer && Math.random() < 0.5) E.moveHLM();
-      if (a.kind === 'bank' && Math.random() < 0.4) { E.bankLoan(1000); loans++; }
-      if (a.kind === 'prop' && a.canImprove && Math.random() < 0.3) E.improveProperty(g().tiles.indexOf(a.tile));
-      next = E.endTurn().next;
-      if (next !== 'same') break;
-      // double : le joueur rejoue
+let guard = 0;
+while (!g().over && guard++ < 5000) {
+  const st = g();
+  const p = st.players[st.cur];
+  const r = E.roll(rnd(6), rnd(6));
+  if (r.stayJail || r.jail) {
+    const er = E.endTurn();
+    if (er.next === 'yearend') { E.applyYearFlows(); yearEnds++; }
+    continue;
+  }
+  const a = E.landOn();
+  landings++;
+  if (a.kind === 'event') events++;
+  if ((a.kind === 'prop' || a.kind === 'housing') && a.consumption) consumptions++;
+  if (a.deaths && a.deaths.length) { a.deaths.forEach(pid => E.confirmDeath(pid)); deaths++; }
+  // décisions : achat uniquement via les cases banque
+  if (a.kind === 'bank') {
+    if (Math.random() < 0.4) { E.bankLoan(1000); loans++; }
+    const free = g().tiles.find(t => (t.type === 'prop' || t.type === 'housing') && !t.public && t.owner === null);
+    if (free && Math.random() < 0.4) {
+      const partners = Math.random() < 0.2 ? [g().players[(g().cur + 1) % 4].id] : [];
+      const res = E.buyProperty(g().tiles.indexOf(free), { partners });
+      check(res.ok !== false, 'achat via la banque');
+      bankBuys++;
     }
-    const r2 = { next };
-    if (r2.next === 'vote') {
-      // phase démocratique
-      E.startVote();
-      check(g().vote.options.length === 5, '5 cartes loi proposées');
-      const lawIdx = rnd(5) - 1;
-      E.chooseLaw(lawIdx);
-      g().players.forEach(() => E.castVote(Math.random() < 0.5));
-      const v = E.resolveVote();
-      check(v.result && typeof v.result.adopted === 'boolean', 'vote résolu');
-      votes++;
-      const recap = E.afterVote();
-      check(recap.rows.length === 4, 'récapitulatif pour 4 joueurs');
-      // décès de vieillesse éventuels
-      while (g().pendingDeaths && g().pendingDeaths.length) { E.confirmDeath(g().pendingDeaths[0]); deaths++; }
-      // échanges aléatoires
-      if (Math.random() < 0.3) {
-        const st = g();
-        const sellerTile = st.tiles.find(t2 => t2.owner !== null && t2.owner !== st.cur);
-        if (sellerTile) {
-          const r3 = E.tradeBuyProperty(sellerTile.owner, st.tiles.indexOf(sellerTile), Math.round(sellerTile.price * 1.2));
-          check(typeof r3.ok === 'boolean', 'transaction entre joueurs');
-          trades++;
-        }
-      }
-      const cont = E.continueAfterRecap();
-      if (cycle === 10) check(cont.next === 'end', 'fin de partie après le cycle 10');
-    } else if (t === 3) {
-      throw new Error('le dernier joueur doit déclencher le vote');
+  }
+  if (a.kind === 'bank' || a.kind === 'prop' || a.kind === 'housing') {
+    // amélioration via la banque uniquement
+    if (a.kind === 'bank' && Math.random() < 0.3) {
+      const own = g().tiles.find(t => t.owner === g().cur && (t.houses || 0) < 5);
+      if (own) E.improveProperty(g().tiles.indexOf(own));
     }
+  }
+  const er = E.endTurn();
+  if (er.next === 'yearend') {
+    yearEnds++;
+    const recap = E.applyYearFlows();
+    check(recap.rows.length === 4, `bilan de fin d'année ${g().year} pour 4 joueurs`);
+    while (g().pendingDeaths && g().pendingDeaths.length) { E.confirmDeath(g().pendingDeaths[0]); deaths++; }
+    // échanges aléatoires
+    if (Math.random() < 0.3) {
+      const st2 = g();
+      const sellerTile = st2.tiles.find(t => t.owner !== null && t.owner !== st2.cur);
+      if (sellerTile) {
+        const r3 = E.tradeBuyProperty(sellerTile.owner, st2.tiles.indexOf(sellerTile), Math.round(sellerTile.price * 1.2));
+        check(typeof r3.ok === 'boolean', 'transaction entre joueurs');
+        trades++;
+      }
+    }
+    // bilan → vote majoritaire → année suivante
+    const c = E.continueAfterRecap();
+    if (c.next === 'end') break;
+    E.startVote();
+    check(g().vote.options.length === 5, '5 cartes loi proposées');
+    E.chooseLaw(rnd(5) - 1);
+    const v = E.setMajority(Math.random() < 0.5);
+    check(v.result && typeof v.result.adopted === 'boolean', 'vote majoritaire résolu');
+    votes++;
+    E.afterVote();
   }
 }
 
-console.log(`— Statistiques : ${landings} atterrissages, ${buys} achats, ${events} événements, ${votes} votes, ${loans} emprunts, ${trades} transactions, ${deaths} successions —`);
+console.log(`— Stats : ${landings} atterrissages, ${consumptions} consommations forcées, ${bankBuys} achats banque, ${events} événements, ${yearEnds} fins d'année, ${votes} votes, ${loans} emprunts, ${trades} transactions, ${deaths} successions —`);
+check(g().year === 10 && g().over === true, `partie terminée après 10 ans (année finale : ${g().year})`);
+check(yearEnds === 10, `10 fins d'année déclenchées (got ${yearEnds})`);
+check(g().history.length === 10, '10 bilans d\'indicateurs archivés');
+check(consumptions > 0, 'consommations forcées sur les cases propriété');
+check(bankBuys > 0, 'achats réalisés via les cases banque');
 
 // ---------- Résultats ----------
 const res = E.finalResults();
@@ -126,9 +143,8 @@ console.log('— Sauvegarde —');
 const saved = JSON.parse(JSON.stringify(g()));
 E.newGame(['X', 'Y']);
 check(g().players.length === 2, 'nouvelle partie propre');
-// restaure l'ancienne partie (comme localStorage)
 vm.runInContext('S = ' + JSON.stringify(saved), ctx);
-check(g().cycle === 10 && g().over === true, 'partie sauvegardée restaurée');
+check(g().year === 10 && g().over === true, 'partie sauvegardée restaurée');
 
 console.log(errors === 0 ? '\n✅ TOUS LES TESTS PASSENT' : `\n❌ ${errors} ÉCHEC(S)`);
 process.exit(errors === 0 ? 0 : 1);

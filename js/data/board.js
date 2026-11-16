@@ -3,7 +3,7 @@
 // type : start | prop | housing | chance | commu | malheur | bank |
 //        gotojail | jail | empty
 // Chaque propriété = une activité économique + une consommation ponctuelle.
-//   price : prix d'achat · dividend : revenu automatique / cycle pour le propriétaire
+//   price : prix d'achat · dividend : revenu automatique / an pour le propriétaire
 //   service : {label, cat, price} consommation subie par celui qui tombe dessus
 //   reimb : taux de remboursement de base (modifié par les lois)
 //   public : service public (non achetable si true)

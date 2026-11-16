@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>MéritoPoly — Prototype</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<!-- ============ ÉCRAN 1 : ACCUEIL / CRÉATION ============ -->
+<section id="screen-home" class="screen">
+  <div class="hero">
+    <div class="logo">MÉRITO<span>POLY</span></div>
+    <div class="tagline">Le Monopoly des inégalités, de la fiscalité et de la redistribution</div>
+  </div>
+  <div id="resume-box" class="card hidden">
+    <p>Une partie est en cours (cycle <b id="resume-cycle"></b>).</p>
+    <button class="btn primary big" onclick="UI.resumeGame()">Reprendre la partie</button>
+    <button class="btn big" onclick="UI.discardSave()">Nouvelle partie</button>
+  </div>
+  <div id="setup-box" class="card">
+    <h2>Nouvelle partie</h2>
+    <p class="hint">2 à 6 joueurs · un seul téléphone partagé · 10 tours de plateau</p>
+    <label class="lbl">Nombre de joueurs</label>
+    <div id="player-count" class="row-btns"></div>
+    <div id="name-fields"></div>
+    <button class="btn primary big" onclick="UI.startSetup()">Créer la partie</button>
+  </div>
+  <div class="card small">
+    <p class="hint">Prévoyez un papier et un crayon : la fiche de chaque personnage vaut un aide-mémoire (revenus, loyer, crédit, foyer).</p>
+  </div>
+</section>
+
+<!-- ============ ÉCRAN 2 : ATTRIBUTION DES PERSONNAGES ============ -->
+<section id="screen-chars" class="screen hidden">
+  <h2 class="screen-title">Attribution des personnages</h2>
+  <div id="char-assign"></div>
+</section>
+
+<!-- ============ ÉCRAN 3 : PLATEAU ============ -->
+<section id="screen-board" class="screen hidden">
+  <div id="hud">
+    <div id="hud-cycle">Cycle 1/10</div>
+    <div id="hud-active"></div>
+    <div id="hud-buttons">
+      <button class="btn tiny" onclick="UI.openFiche()">Fiche</button>
+      <button class="btn tiny" onclick="UI.openTrade()">Échanges</button>
+      <button class="btn tiny" onclick="UI.openDashboard()">Social</button>
+      <button class="btn tiny" onclick="UI.openLaws()">Lois</button>
+      <button class="btn tiny" onclick="UI.openLog()">Journal</button>
+    </div>
+  </div>
+  <div id="board-wrap"><div id="board"></div></div>
+  <div id="dice-zone" class="card">
+    <div id="dice-label"></div>
+    <div id="dice-inputs">
+      <select id="die1" class="die"></select>
+      <select id="die2" class="die"></select>
+    </div>
+    <button id="btn-roll" class="btn primary big" onclick="UI.onRoll()">Valider les dés</button>
+    <button id="btn-endturn" class="btn primary big hidden" onclick="UI.onEndTurn()">Terminer le tour</button>
+  </div>
+</section>
+
+<!-- ============ ÉCRAN FINAL ============ -->
+<section id="screen-end" class="screen hidden">
+  <h2 class="screen-title" id="end-verdict"></h2>
+  <div id="end-content"></div>
+  <button class="btn primary big" onclick="UI.restart()">Nouvelle partie</button>
+</section>
+
+<!-- ============ MODALE GÉNÉRIQUE ============ -->
+<div id="overlay" class="hidden">
+  <div id="modal">
+    <div id="modal-title"></div>
+    <div id="modal-body"></div>
+    <div id="modal-actions"></div>
+  </div>
+</div>
+
+<script src="js/data/config.js"></script>
+<script src="js/data/characters.js"></script>
+<script src="js/data/board.js"></script>
+<script src="js/data/events.js"></script>
+<script src="js/data/laws.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
